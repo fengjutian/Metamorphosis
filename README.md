@@ -168,22 +168,21 @@ z112 z113 z114 ...  z127
 
 当前版本已经接入真正的三阶段 WebGL2 管线：
 
-1. **Volume Pass**：将 `128³` 体素排列为 `16 × 8` 个切片，保存到两张 `2048 × 1024 RGBA16F` 图集并进行 ping-pong 更新；
+1. **Volume Pass**：使用两张真实的 `RGBA16F TEXTURE_3D` 保存体素；每次更新逐层挂载 framebuffer，执行与 `mainVolume` 对应的 ping-pong 计算；
 2. **Scene Pass**：对体积距离场进行 sphere tracing 和体积积分，渲染天空、水面及二次体积反射，并在 Alpha 中保存深度；
 3. **Image Pass**：执行景深、Bloom、God Rays、雾、色差、色调映射、调色、颗粒和宽银幕遮幅。
 
 相关实现位于：
 
 - `src/shaders.js`：Volume、Scene 与 Image 三个 GLSL Pass；
-- `src/renderer.js`：图集寻址、浮点纹理、framebuffer 和三阶段调度；
+- `src/renderer.js`：三维浮点纹理、逐层 framebuffer 和三阶段调度；
 - `src/main.jsx`：React 控制界面。
 
 默认体积尺寸在 `src/renderer.js` 中设置：
 
 ```js
 const volumeSize = 128;
-const gridWidth = 16;
-const gridHeight = 8;
+// 两张 volumeSize³ 的 TEXTURE_3D
 ```
 
 `128³` 每帧需要处理 2,097,152 个体素，计算量很高。如果设备无法维持可接受的帧率，可将其降为：
@@ -194,7 +193,7 @@ const gridWidth = 8;
 const gridHeight = 8;
 ```
 
-64³ 模式已经通过软件 WebGL 渲染验证；128³ 模式可以成功构建和编译，但建议使用支持 WebGL2 浮点 framebuffer 的独立显卡运行。
+32³ 诊断模式已经通过软件 WebGL 实际渲染验证；64³ 与 128³ 使用相同的真实三维纹理路径。128³ 建议使用支持 WebGL2 浮点 framebuffer 的独立显卡运行。
 
 也可以不修改源码，直接用查询参数启动轻量模式：
 
@@ -229,13 +228,12 @@ http://127.0.0.1:5173/?volume=128&morph=1
 
 ### 已实施的性能优化
 
-- 程序化噪声与莲花目标场仅在形变数值变化时重新计算；
-- 目标场与距离传播分离，静止收敛阶段不再重复计算六层噪声；
-- 距离传播完成 128 次迭代后冻结整个 Volume Pass；
+- Volume 改用真实 `TEXTURE_3D`，删除会改变采样结果的二维 Atlas 适配；
+- 每个 Z 层独立挂载到 framebuffer，严格保持三维体素邻域；
+- 静止形态完成初始距离传播后冻结 Volume Pass；
 - 对尚未完全收敛的距离场限制 sphere-march 最大步长，避免越过薄花瓣；
 - 主视线与水面反射恢复原始 1200 次积分上限，以花瓣轮廓保真优先；
-- 提供 `?volume=64` 轻量运行档，同时保留默认 `128³` 输出。
-- 目标形态变化时使用 GPU framebuffer blit 重置两张距离纹理，避免旧球体的负距离残留在莲花外部。
+- 提供 `?volume=32`、`?volume=64` 和 `?volume=128` 三种运行档。
 
 ## 浏览器要求
 
