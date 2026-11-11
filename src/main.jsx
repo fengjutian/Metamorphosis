@@ -4,6 +4,7 @@ import './styles.css';
 import { createMetamorphosisRenderer } from './renderer.js';
 
 function App() {
+  const volumeSize = new URLSearchParams(window.location.search).get('volume') === '64' ? 64 : 128;
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
   const [paused, setPaused] = useState(false);
@@ -42,7 +43,7 @@ function App() {
 
       <aside className="panel">
         <div className="panel-head">
-          <span>128³ VOLUME</span><span className="live"><i /> LIVE</span>
+          <span>{volumeSize}³ VOLUME</span><span className="live"><i /> LIVE</span>
         </div>
         <label className="row switch-row">
           <span>自动形变</span>

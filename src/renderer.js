@@ -60,7 +60,7 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
   const volumeProgram = createProgram(gl, volumeFragment, 'Volume Pass');
   const sceneProgram = createProgram(gl, sceneFragment, 'Scene Pass');
   const postProgram = createProgram(gl, postFragment, 'Image Pass');
-  const volumeUniforms = uniforms(gl, volumeProgram, ['uPrevious', 'uMorph', 'uSize', 'uGrid']);
+  const volumeUniforms = uniforms(gl, volumeProgram, ['uPrevious', 'uTarget', 'uMorph', 'uSize', 'uGrid', 'uMode']);
   const sceneUniforms = uniforms(gl, sceneProgram, ['uVolume', 'uResolution', 'uTime', 'uMorph', 'uSize', 'uGrid']);
   const postUniforms = uniforms(gl, postProgram, ['uScene', 'uResolution', 'uTime']);
 
@@ -74,9 +74,10 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
   }
 
-  // 128 slices in a 16×8 atlas: 2048×1024 texels = 128³ voxels.
-  const volumeSize = 128;
-  const gridWidth = 16;
+  // Default: 128³ in a 16×8 atlas. Use ?volume=64 for the lighter 64³ profile.
+  const requestedVolumeSize = Number(new URLSearchParams(location.search).get('volume'));
+  const volumeSize = requestedVolumeSize === 64 ? 64 : 128;
+  const gridWidth = volumeSize === 64 ? 8 : 16;
   const gridHeight = 8;
   const atlasWidth = volumeSize * gridWidth;
   const atlasHeight = volumeSize * gridHeight;
@@ -85,6 +86,8 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST),
   ];
   const volumeFrames = volumeTextures.map(texture => createFramebuffer(gl, texture));
+  const targetTexture = createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST);
+  const targetFrame = createFramebuffer(gl, targetTexture);
 
   // A large positive first frame prevents uninitialized texels becoming phantom surfaces.
   for (const frame of volumeFrames) {
@@ -107,6 +110,8 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
   let startTime = performance.now();
   let elapsed = 0;
   let lastUiUpdate = 0;
+  let lastVolumeMorph = Number.NaN;
+  let settleFrames = 0;
 
   function resize() {
     const scale = Math.min(devicePixelRatio, 1.5) * quality;
@@ -141,17 +146,33 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     if (!paused) elapsed = (now - startTime) / 1000;
     const morph = morphAt(elapsed);
 
-    // Pass 1: update every voxel in the 8×8 slice atlas using last frame as input.
+    // Pass 1a: expensive procedural target field. It only runs when morph changes.
+    const morphChanged = !Number.isFinite(lastVolumeMorph) || Math.abs(morph - lastVolumeMorph) > 0.00025;
     gl.useProgram(volumeProgram);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, volumeFrames[1 - volumeIndex]);
     gl.viewport(0, 0, atlasWidth, atlasHeight);
-    bindTexture(0, volumeTextures[volumeIndex]);
-    gl.uniform1i(volumeUniforms.uPrevious, 0);
     gl.uniform1f(volumeUniforms.uMorph, morph);
     gl.uniform1f(volumeUniforms.uSize, volumeSize);
     gl.uniform2f(volumeUniforms.uGrid, gridWidth, gridHeight);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    volumeIndex = 1 - volumeIndex;
+    if (morphChanged) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, targetFrame);
+      gl.uniform1i(volumeUniforms.uMode, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      lastVolumeMorph = morph;
+      settleFrames = 128;
+    }
+
+    // Pass 1b: cheap distance propagation. Once converged, the whole Volume pass freezes.
+    if (settleFrames > 0) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, volumeFrames[1 - volumeIndex]);
+      bindTexture(0, volumeTextures[volumeIndex]);
+      bindTexture(1, targetTexture);
+      gl.uniform1i(volumeUniforms.uPrevious, 0);
+      gl.uniform1i(volumeUniforms.uTarget, 1);
+      gl.uniform1i(volumeUniforms.uMode, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      volumeIndex = 1 - volumeIndex;
+      settleFrames -= 1;
+    }
 
     // Pass 2: ray march the volume and render sky/water into an HDR RGBA target.
     gl.useProgram(sceneProgram);
@@ -190,6 +211,8 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
       [volumeProgram, sceneProgram, postProgram].forEach(program => gl.deleteProgram(program));
       volumeTextures.forEach(texture => gl.deleteTexture(texture));
       volumeFrames.forEach(frame => gl.deleteFramebuffer(frame));
+      gl.deleteTexture(targetTexture);
+      gl.deleteFramebuffer(targetFrame);
       gl.deleteTexture(sceneTexture);
       gl.deleteFramebuffer(sceneFrame);
       gl.deleteBuffer(triangle);

@@ -8,9 +8,11 @@ precision highp float;
 precision highp sampler2D;
 out vec4 fragColor;
 uniform sampler2D uPrevious;
+uniform sampler2D uTarget;
 uniform float uMorph;
 uniform float uSize;
 uniform vec2 uGrid;
+uniform int uMode;
 
 #define TAU 6.28318530718
 
@@ -57,7 +59,8 @@ float targetField(vec3 voxel){
 void main(){
   ivec3 V=voxelFromPixel(ivec2(gl_FragCoord.xy));
   if(V.z>=int(uSize)){fragColor=vec4(4,0,0,1);return;}
-  float field=targetField(vec3(V));
+  if(uMode==0){fragColor=vec4(targetField(vec3(V)),0,0,1);return;}
+  float field=texelFetch(uTarget,ivec2(gl_FragCoord.xy),0).r;
   if(field<=.1){fragColor=vec4(field,0,0,1);return;}
   float best=1e9,bestLen=0.,voxel=2./uSize;
   for(int k=0;k<27;k++){
@@ -135,11 +138,11 @@ void main(){
   vec3 forward=normalize(target-P),right=normalize(cross(forward,vec3(0,1,0))),up=cross(right,forward),D=normalize(uv.x*right+uv.y*up+k.w*forward);
   if(gl_FragCoord.x<1.&&gl_FragCoord.y<1.){vec3 s=vec3(dot(SUN,right),dot(SUN,up),dot(SUN,forward));vec2 sunUV=.5+.5*(s.xy*k.w/max(s.z,.001))*vec2(uResolution.y/uResolution.x,1);fragColor=vec4(sunUV,smoothstep(0.,.3,s.z)*.99,SKY_DEPTH);return;}
   vec2 bounds=boxHit(P,D);float waterT=D.y<-.001?(WATER-P.y)/D.y:1e9,objectDepth=1e9;vec4 volume=vec4(0,0,0,1);
-  if(bounds.x<bounds.y&&bounds.y>0.)volume=marchVolume(P,D,max(bounds.x,0.),min(bounds.y,waterT),objectDepth,640);
+  if(bounds.x<bounds.y&&bounds.y>0.)volume=marchVolume(P,D,max(bounds.x,0.),min(bounds.y,waterT),objectDepth,384);
   vec3 background;float depth=SKY_DEPTH;
   if(waterT<1e8){
     vec3 hit=P+waterT*D;depth=min(waterT*10.,80.);vec2 slope=waterSlope(hit.xz,uTime,waterT);vec3 nw=normalize(vec3(-slope.x,1,-slope.y)),reflected=reflect(D,nw);reflected.y=abs(reflected.y);
-    vec2 rb=boxHit(hit,reflected);float unused;vec4 reflectedVolume=vec4(0,0,0,1);if(rb.x<rb.y&&rb.y>0.)reflectedVolume=marchVolume(hit,reflected,max(rb.x,0.),rb.y,unused,260);
+    vec2 rb=boxHit(hit,reflected);float unused;vec4 reflectedVolume=vec4(0,0,0,1);if(rb.x<rb.y&&rb.y>0.)reflectedVolume=marchVolume(hit,reflected,max(rb.x,0.),rb.y,unused,120);
     vec3 reflection=reflectedVolume.rgb+reflectedVolume.a*sky(reflected);float fres=.1+.9*pow(1.-max(dot(nw,-D),0.),4.);vec3 deep=vec3(.004,.022,.035)+vec3(0,.02,.02)*(.5+.5*nw.x);
     background=mix(sky(normalize(vec3(D.x,0,D.z))),mix(deep,reflection,fres),exp(-.03*waterT));
   }else background=sky(D);
