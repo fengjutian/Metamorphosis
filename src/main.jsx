@@ -5,9 +5,11 @@ import { createMetamorphosisRenderer } from './renderer.js';
 
 function App() {
   const query = new URLSearchParams(window.location.search);
-  const volumeSize = query.get('volume') === '64' ? 64 : 128;
+  const volumeSize = query.get('volume') === '128' ? 128 : 64;
   const initialMorph = Math.max(0, Math.min(1, Number(query.get('morph')) || 0));
   const hasFixedMorph = query.has('morph');
+  const fixedTime = query.has('time') ? Math.max(0, Number(query.get('time')) || 0) : null;
+  const cleanView = query.get('clean') === '1';
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
   const [paused, setPaused] = useState(false);
@@ -20,6 +22,9 @@ function App() {
     try {
       rendererRef.current = createMetamorphosisRenderer(canvasRef.current, {
         quality,
+        initialAutoMorph: !hasFixedMorph,
+        initialMorph,
+        fixedTime,
         onMorph: setMorph,
       });
       rendererRef.current.start();
@@ -37,14 +42,14 @@ function App() {
   return (
     <main>
       <canvas ref={canvasRef} aria-label="莲花体积着色器动画" />
-      <div className="grain" />
-      <header>
+      {!cleanView && <div className="grain" />}
+      {!cleanView && <header>
         <div className="eyebrow">REAL-TIME WEBGL STUDY · 2026</div>
         <h1>METAMORPHOSIS</h1>
         <p>从湍流星体，到水上莲花。</p>
-      </header>
+      </header>}
 
-      <aside className="panel">
+      {!cleanView && <aside className="panel">
         <div className="panel-head">
           <span>{volumeSize}³ VOLUME</span><span className="live"><i /> LIVE</span>
         </div>
@@ -63,9 +68,9 @@ function App() {
             onChange={e => setQuality(Number(e.target.value))} />
         </label>
         <button onClick={() => setPaused(v => !v)}>{paused ? '继续播放' : '暂停画面'}</button>
-      </aside>
+      </aside>}
 
-      <footer><span>VOLUME / SDF / REFRACTION</span><span>40 SEC LOOP</span></footer>
+      {!cleanView && <footer><span>VOLUME / SDF / REFRACTION</span><span>40 SEC LOOP</span></footer>}
       {error && <div className="error"><strong>WebGL 初始化失败</strong><br />{error}</div>}
     </main>
   );

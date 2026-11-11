@@ -74,16 +74,18 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
   }
 
-  // Default: 128³ in a 16×8 atlas. Use ?volume=64 for the lighter 64³ profile.
+  // Default: responsive 64³. Use ?volume=128 for the original high-density grid.
   const requestedVolumeSize = Number(new URLSearchParams(location.search).get('volume'));
-  const volumeSize = requestedVolumeSize === 64 ? 64 : 128;
+  const volumeSize = requestedVolumeSize === 128 ? 128 : 64;
   const gridWidth = volumeSize === 64 ? 8 : 16;
   const gridHeight = 8;
   const atlasWidth = volumeSize * gridWidth;
   const atlasHeight = volumeSize * gridHeight;
   const volumeTextures = [
-    createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST),
-    createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST),
+    // texelFetch in the propagation pass remains exact, while LINEAR gives
+    // the scene pass bilinear XY filtering; Z is interpolated manually.
+    createFloatTexture(gl, atlasWidth, atlasHeight, gl.LINEAR),
+    createFloatTexture(gl, atlasWidth, atlasHeight, gl.LINEAR),
   ];
   const volumeFrames = volumeTextures.map(texture => createFramebuffer(gl, texture));
   const targetTexture = createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST);
@@ -104,14 +106,15 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
   let volumeIndex = 0;
   let quality = options.quality ?? 0.72;
   let paused = false;
-  let automaticMorph = true;
-  let manualMorph = 0;
+  let automaticMorph = options.initialAutoMorph ?? true;
+  let manualMorph = options.initialMorph ?? 0;
   let animationFrame = 0;
   let startTime = performance.now();
   let elapsed = 0;
   let lastUiUpdate = 0;
   let lastVolumeMorph = Number.NaN;
   let settleFrames = 0;
+  const fixedTime = Number.isFinite(options.fixedTime) ? options.fixedTime : null;
 
   function resize() {
     const scale = Math.min(devicePixelRatio, 1.5) * quality;
@@ -143,7 +146,8 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
 
   function draw(now) {
     resize();
-    if (!paused) elapsed = (now - startTime) / 1000;
+    if (fixedTime !== null) elapsed = fixedTime;
+    else if (!paused) elapsed = (now - startTime) / 1000;
     const morph = morphAt(elapsed);
 
     // Pass 1a: expensive procedural target field. It only runs when morph changes.
@@ -158,21 +162,6 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
       gl.uniform1i(volumeUniforms.uMode, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      // A signed-distance relaxation can only decrease values. Reusing the old
-      // negative sphere values would therefore leave an immortal spherical shell
-      // around the lotus. Seed both ping-pong textures from the new target field
-      // whenever the topology changes, then start propagation from clean data.
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, targetFrame);
-      for (const volumeFrame of volumeFrames) {
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, volumeFrame);
-        gl.blitFramebuffer(
-          0, 0, atlasWidth, atlasHeight,
-          0, 0, atlasWidth, atlasHeight,
-          gl.COLOR_BUFFER_BIT,
-          gl.NEAREST,
-        );
-      }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, targetFrame);
       lastVolumeMorph = morph;
       settleFrames = 128;
     }

@@ -17,12 +17,19 @@ uniform int uMode;
 #define TAU 6.28318530718
 
 float hash11(float n){return fract(sin(n*12.9898)*43758.5453);}
-float hash31(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
-float noise3(vec3 p){
-  vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-  return mix(mix(mix(hash31(i),hash31(i+vec3(1,0,0)),f.x),mix(hash31(i+vec3(0,1,0)),hash31(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash31(i+vec3(0,0,1)),hash31(i+vec3(1,0,1)),f.x),mix(hash31(i+vec3(0,1,1)),hash31(i+vec3(1)),f.x),f.y),f.z);
+const vec3 HASH_SEED=vec3(467.,581.,389.);
+vec3 gradientAt(vec3 cell){mat3 seeds=mat3(HASH_SEED,73.-HASH_SEED,HASH_SEED.zxy);return 2.*fract(sin(cell*seeds)*3758.54)-1.;}
+float cornerValue(vec3 x,vec3 cell,vec3 offset){vec3 corner=cell+offset;return dot(gradientAt(corner),x-corner);}
+float perlinAbs(vec3 x){
+  vec3 cell=floor(x),w=smoothstep(0.,1.,fract(x));
+  float n000=cornerValue(x,cell,vec3(0,0,0)),n100=cornerValue(x,cell,vec3(1,0,0));
+  float n010=cornerValue(x,cell,vec3(0,1,0)),n110=cornerValue(x,cell,vec3(1,1,0));
+  float n001=cornerValue(x,cell,vec3(0,0,1)),n101=cornerValue(x,cell,vec3(1,0,1));
+  float n011=cornerValue(x,cell,vec3(0,1,1)),n111=cornerValue(x,cell,vec3(1,1,1));
+  float nx00=mix(n000,n100,w.x),nx10=mix(n010,n110,w.x),nx01=mix(n001,n101,w.x),nx11=mix(n011,n111,w.x);
+  return 2.*abs(mix(mix(nx00,nx10,w.y),mix(nx01,nx11,w.y),w.z));
 }
-float turbulence(vec3 p){float s=0.,a=.5;for(int i=0;i<6;i++){s+=abs(noise3(p)*2.-1.)*a;p=p*2.03+1.7;a*=.5;}return s;}
+float turbulence(vec3 p){float sum=0.,scale=1.;for(int i=0;i<6;i++){sum+=perlinAbs(p)/scale;p*=2.;scale*=2.;}return sum;}
 float ellipsoid(vec3 p,vec3 r){float k0=length(p/r),k1=length(p/(r*r));return k0*(k0-1.)/max(k1,1e-4);}
 float petalRing(vec3 q,float count,float rotation,float baseRadius,float baseHeight,float tilt,float len,float width,float thick,float bend,float cup,float seed){
   float radius=length(q.xz),angle=atan(q.z,q.x)-rotation,sector=TAU/count,index=round(angle/sector),local=angle-index*sector,d=1e9;
@@ -49,10 +56,11 @@ float lotus(vec3 q){
 ivec3 voxelFromPixel(ivec2 p){int n=int(uSize),gx=int(uGrid.x),tx=p.x/n,ty=p.y/n;return ivec3(p.x-tx*n,p.y-ty*n,tx+ty*gx);}
 ivec2 pixelFromVoxel(ivec3 v){int n=int(uSize),gx=int(uGrid.x);return ivec2((v.z%gx)*n+v.x,(v.z/gx)*n+v.y);}
 float previous(ivec3 v){int n=int(uSize);v=clamp(v,ivec3(0),ivec3(n-1));return texelFetch(uPrevious,pixelFromVoxel(v),0).r;}
+float targetAt(ivec3 v){int n=int(uSize);v=clamp(v,ivec3(0),ivec3(n-1));return texelFetch(uTarget,pixelFromVoxel(v),0).r;}
 float targetField(vec3 voxel){
   vec3 q=voxel/(uSize*.5)-1.;
-  float n=turbulence(q*2.)*.55-.31;
-  float sphere=length(q)-.6+n*.72;
+  float n=turbulence(q)/2.-.274;
+  float sphere=length(q)-.6+2.*n-.1;
   float flower=lotus(q)+n*.15;
   return mix(sphere,flower,uMorph);
 }
@@ -66,7 +74,9 @@ void main(){
   for(int k=0;k<27;k++){
     if(k==13)continue;
     ivec3 off=ivec3(k%3,(k/3)%3,k/9)-1;
-    float value=previous(V+off);
+    ivec3 neighbor=V+off;
+    float neighborTarget=targetAt(neighbor);
+    float value=neighborTarget<=.1?neighborTarget:max(previous(neighbor),0.);
     if(value<best){best=value;bestLen=length(vec3(off));}
   }
   fragColor=vec4(min(field,best+bestLen*voxel),0,0,1);
@@ -134,8 +144,8 @@ vec2 waterSlope(vec2 q,float t,float dist){
 }
 void main(){
   vec2 uv=(2.*gl_FragCoord.xy-uResolution)/uResolution.y;vec4 k=cameraPath(uTime/5.);float theta=.22*uTime+.35*sin(.17*uTime),height=max(k.y,WATER+.2);
-  vec3 P=vec3(k.x*sin(theta),height,k.x*cos(theta)),target=vec3(0,k.z-.1,0);P+=.02*vec3(sin(uTime*1.3),sin(uTime*1.7+1.),sin(uTime*1.1+2.));
-  vec3 forward=normalize(target-P),right=normalize(cross(forward,vec3(0,1,0))),up=cross(right,forward),D=normalize(uv.x*right+uv.y*up+k.w*forward);
+  vec3 P=vec3(k.x*sin(theta),height,k.x*cos(theta)),target=vec3(0,k.z-.1,0);P+=.02*vec3(sin(uTime*1.3),sin(uTime*1.7+1.),sin(uTime*1.1+2.));target+=.015*vec3(sin(uTime*1.9+3.),sin(uTime*1.5),sin(uTime*1.2+1.));
+  float roll=.03*sin(.4*uTime);vec3 cameraUp=vec3(sin(roll),cos(roll),0.);vec3 forward=normalize(target-P),right=normalize(cross(forward,cameraUp)),up=cross(right,forward),D=normalize(uv.x*right+uv.y*up+k.w*forward);
   if(gl_FragCoord.x<1.&&gl_FragCoord.y<1.){vec3 s=vec3(dot(SUN,right),dot(SUN,up),dot(SUN,forward));vec2 sunUV=.5+.5*(s.xy*k.w/max(s.z,.001))*vec2(uResolution.y/uResolution.x,1);fragColor=vec4(sunUV,smoothstep(0.,.3,s.z)*.99,SKY_DEPTH);return;}
   vec2 bounds=boxHit(P,D);float waterT=D.y<-.001?(WATER-P.y)/D.y:1e9,objectDepth=1e9;vec4 volume=vec4(0,0,0,1);
   if(bounds.x<bounds.y&&bounds.y>0.)volume=marchVolume(P,D,max(bounds.x,0.),min(bounds.y,waterT),objectDepth,384);
@@ -158,8 +168,17 @@ uniform vec2 uResolution;
 uniform float uTime;
 float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
 float hash12(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
+float vnoise2(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);float a=hash12(i),b=hash12(i+vec2(1,0)),c=hash12(i+vec2(0,1)),d=hash12(i+vec2(1));return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);}
+float fbm2(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=a*vnoise2(p);p=p*2.02+vec2(3.1,1.7);a*=.5;}return s;}
 float coc(float d){float c=smoothstep(20.,70.,abs(d-25.))*.6;c*=1.-smoothstep(85.,105.,d);return max(c,smoothstep(12.,0.,d));}
 vec3 karis(vec2 uv,vec2 ts){vec3 c=texture(uScene,uv).rgb,a=texture(uScene,uv+vec2(-.75,-.75)*ts).rgb,b=texture(uScene,uv+vec2(.75,-.75)*ts).rgb,d=texture(uScene,uv+vec2(-.75,.75)*ts).rgb,e=texture(uScene,uv+vec2(.75,.75)*ts).rgb;float wc=2./(1.+luma(c)),wa=1./(1.+luma(a)),wb=1./(1.+luma(b)),wd=1./(1.+luma(d)),we=1./(1.+luma(e));return(c*wc+a*wa+b*wb+d*wd+e*we)/(wc+wa+wb+wd+we);}
+vec3 atmosphere(vec2 uv,float rnd,float aspect,float depth){
+  float isSky=smoothstep(90.,110.,depth),surface=1.-isSky;vec2 q=vec2(uv.x*aspect,uv.y)*2.;
+  float n=fbm2(q+vec2(uTime*.012,-uTime*.008)),n2=fbm2(q*2.2+vec2(-uTime*.02,uTime*.01)+5.2),wisps=smoothstep(.35,.75,n*.65+n2*.35);
+  vec3 haze=vec3(.1,.18,.3)*.3*smoothstep(30.,52.,depth)*surface*(.4+.6*wisps),halo=vec3(0);
+  if(isSky>.01){vec3 acc=vec3(0);float weights=0.;for(int i=0;i<16;i++){float r=sqrt((float(i)+.5)/16.)*.07,a=float(i)*2.39996323+rnd*6.28318;vec2 off=vec2(cos(a)/aspect,sin(a))*r;vec4 s=texture(uScene,clamp(uv+off,0.,1.));float w=1.-.7*(r/.07);acc+=s.rgb*(1.-smoothstep(90.,110.,s.a))*w/(1.+luma(s.rgb));weights+=w;}halo=acc/max(weights,.001)*.5*vec3(.55,.75,1.)*(.5+.8*wisps);}
+  return haze+halo*isSky;
+}
 void main(){
   vec2 ts=1./uResolution,uv=gl_FragCoord.xy*ts,v=uv-.5;float aspect=uResolution.x/uResolution.y,bar=max(0.,(1.-aspect/2.35)/2.);
   if(uv.y<bar||uv.y>1.-bar){fragColor=vec4(0,0,0,1);return;}
@@ -167,6 +186,6 @@ void main(){
   if(blur>.01){vec3 acc=vec3(0);float weights=0.;for(int i=0;i<16;i++){float r=sqrt((float(i)+.5)/16.),a=float(i)*2.39996323+rnd*6.28318;vec2 off=vec2(cos(a)/aspect,sin(a))*r*blur*.0055;vec4 s=texture(uScene,clamp(uv+off,0.,1.));float w=s.a<center.a?clamp(coc(s.a)/max(blur,.001),0.,1.):1.;w/=1.+luma(s.rgb);acc+=s.rgb*w;weights+=w;}color=mix(sharp,acc/max(weights,.001),smoothstep(.01,.1,blur));}
   vec3 bloom=vec3(0);for(int i=0;i<24;i++){float r=sqrt((float(i)+.5)/24.)*.02,a=float(i)*2.39996323+rnd*6.28318;vec2 off=vec2(cos(a)/aspect,sin(a))*r;vec4 s=texture(uScene,clamp(uv+off,0.,1.));float far=smoothstep(30.,60.,s.a)*(1.-smoothstep(105.,115.,s.a)),L=luma(s.rgb);bloom+=s.rgb*max(L-.25,0.)*far/(1.+L);}color+=bloom/24.*1.5*vec3(1,.72,.45);
   vec4 sun=texelFetch(uScene,ivec2(0),0);if(sun.z>0.){vec2 delta=(sun.xy-uv)*.95/48.,pos=uv+delta*rnd;float illumination=1.,sum=0.;for(int i=0;i<48;i++){vec2 dv=(pos-sun.xy)*vec2(aspect,1);float d2=dot(dv,dv),glow=exp(-d2/.012)+.15*exp(-sqrt(d2)*3.),open=1.;if(all(greaterThanEqual(pos,vec2(0)))&&all(lessThanEqual(pos,vec2(1))))open=smoothstep(90.,110.,texture(uScene,pos).a);sum+=glow*open*illumination;illumination*=.965;pos+=delta;}color+=vec3(1,.7,.42)*pow(sum/48.,.8)*1.1*sun.z;}
-  color+=vec3(.1,.18,.3)*.3*smoothstep(30.,52.,center.a)*(1.-smoothstep(90.,110.,center.a));color*=.9;color=color/(1.+color);color=pow(max(color,0.),vec3(1./2.2));float lum=luma(color);color*=mix(vec3(.85,.97,1.1),vec3(1.1,1,.88),smoothstep(.1,.8,lum));color=mix(vec3(lum),color,1.15);color=mix(color,smoothstep(0.,1.,color),.5);color*=mix(.72,1.,smoothstep(1.4,.35,length(v)));color+=(rnd-.5)*1.5/255.;
+  color+=atmosphere(uv,rnd,aspect,center.a);color*=.9;color=color/(1.+color);color=pow(max(color,0.),vec3(1./2.2));float lum=luma(color);color*=mix(vec3(.85,.97,1.1),vec3(1.1,1,.88),smoothstep(.1,.8,lum));color=mix(vec3(lum),color,1.15);color=mix(color,smoothstep(0.,1.,color),.5);color*=mix(.72,1.,smoothstep(1.4,.35,length(v)));color+=(rnd-.5)*1.5/255.;
   float local=mod(uTime,40.),fade=(uTime<1.5?1.:smoothstep(0.,1.5,local))*smoothstep(0.,1.5,40.-local);fragColor=vec4(clamp(color*fade,0.,1.),1);
 }`;
