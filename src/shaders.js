@@ -6,6 +6,7 @@ void main(){vUv=position*.5+.5;gl_Position=vec4(position,0.,1.);}`;
 export const volumeFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
+precision highp sampler3D;
 out vec4 fragColor;
 uniform sampler3D uPrevious;
 uniform float uMorph;
@@ -75,6 +76,7 @@ void main(){
 
 export const sceneFragment = `#version 300 es
 precision highp float;
+precision highp sampler3D;
 precision highp sampler2D;
 out vec4 fragColor;
 uniform sampler3D uVolume;
