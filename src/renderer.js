@@ -157,6 +157,22 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, targetFrame);
       gl.uniform1i(volumeUniforms.uMode, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // A signed-distance relaxation can only decrease values. Reusing the old
+      // negative sphere values would therefore leave an immortal spherical shell
+      // around the lotus. Seed both ping-pong textures from the new target field
+      // whenever the topology changes, then start propagation from clean data.
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, targetFrame);
+      for (const volumeFrame of volumeFrames) {
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, volumeFrame);
+        gl.blitFramebuffer(
+          0, 0, atlasWidth, atlasHeight,
+          0, 0, atlasWidth, atlasHeight,
+          gl.COLOR_BUFFER_BIT,
+          gl.NEAREST,
+        );
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, targetFrame);
       lastVolumeMorph = morph;
       settleFrames = 128;
     }

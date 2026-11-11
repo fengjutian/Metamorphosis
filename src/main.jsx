@@ -4,12 +4,15 @@ import './styles.css';
 import { createMetamorphosisRenderer } from './renderer.js';
 
 function App() {
-  const volumeSize = new URLSearchParams(window.location.search).get('volume') === '64' ? 64 : 128;
+  const query = new URLSearchParams(window.location.search);
+  const volumeSize = query.get('volume') === '64' ? 64 : 128;
+  const initialMorph = Math.max(0, Math.min(1, Number(query.get('morph')) || 0));
+  const hasFixedMorph = query.has('morph');
   const canvasRef = useRef(null);
   const rendererRef = useRef(null);
   const [paused, setPaused] = useState(false);
-  const [autoMorph, setAutoMorph] = useState(true);
-  const [morph, setMorph] = useState(0);
+  const [autoMorph, setAutoMorph] = useState(!hasFixedMorph);
+  const [morph, setMorph] = useState(initialMorph);
   const [quality, setQuality] = useState(0.72);
   const [error, setError] = useState('');
 
