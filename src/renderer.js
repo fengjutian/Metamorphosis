@@ -4,9 +4,7 @@ function compile(gl, type, source, label) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    throw new Error(`${label} 编译失败：\n${gl.getShaderInfoLog(shader)}`);
-  }
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(`${label}: ${gl.getShaderInfoLog(shader)}`);
   return shader;
 }
 
@@ -15,54 +13,56 @@ function createProgram(gl, fragment, label) {
   gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, fullscreenVertex, `${label} vertex`));
   gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment, `${label} fragment`));
   gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error(`${label} 链接失败：\n${gl.getProgramInfoLog(program)}`);
-  }
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`${label}: ${gl.getProgramInfoLog(program)}`);
   return program;
 }
 
-function createFloatTexture(gl, width, height, filter = gl.LINEAR) {
+function createTexture2D(gl, width, height) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
   return texture;
 }
 
-function createFramebuffer(gl, texture) {
-  const framebuffer = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    throw new Error('当前设备不支持所需的浮点帧缓冲。');
-  }
-  return framebuffer;
+function createTexture3D(gl, size) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_3D, texture);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, size, size, size, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  return texture;
 }
 
-function uniforms(gl, program, names) {
+function createFramebuffer2D(gl, texture) {
+  const frame = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('2D float framebuffer unsupported');
+  return frame;
+}
+
+function uniformLocations(gl, program, names) {
   return Object.fromEntries(names.map(name => [name, gl.getUniformLocation(program, name)]));
 }
 
 export function createMetamorphosisRenderer(canvas, options = {}) {
-  const gl = canvas.getContext('webgl2', {
-    antialias: false,
-    alpha: false,
-    powerPreference: 'high-performance',
-  });
-  if (!gl) throw new Error('此浏览器或显卡不支持 WebGL 2。');
-  if (!gl.getExtension('EXT_color_buffer_float')) {
-    throw new Error('当前设备不支持 EXT_color_buffer_float。');
-  }
+  const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' });
+  if (!gl) throw new Error('WebGL 2 is required');
+  if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float is required');
 
   const volumeProgram = createProgram(gl, volumeFragment, 'Volume Pass');
   const sceneProgram = createProgram(gl, sceneFragment, 'Scene Pass');
   const postProgram = createProgram(gl, postFragment, 'Image Pass');
-  const volumeUniforms = uniforms(gl, volumeProgram, ['uPrevious', 'uTarget', 'uMorph', 'uSize', 'uGrid', 'uMode']);
-  const sceneUniforms = uniforms(gl, sceneProgram, ['uVolume', 'uResolution', 'uTime', 'uMorph', 'uSize', 'uGrid']);
-  const postUniforms = uniforms(gl, postProgram, ['uScene', 'uResolution', 'uTime']);
+  const volumeUniforms = uniformLocations(gl, volumeProgram, ['uPrevious', 'uMorph', 'uSize', 'uLayer']);
+  const sceneUniforms = uniformLocations(gl, sceneProgram, ['uVolume', 'uResolution', 'uTime', 'uMorph', 'uSize']);
+  const postUniforms = uniformLocations(gl, postProgram, ['uScene', 'uResolution', 'uTime']);
 
   const triangle = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, triangle);
@@ -74,36 +74,30 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
   }
 
-  // Default: responsive 64³. Use ?volume=128 for the original high-density grid.
-  const requestedVolumeSize = Number(new URLSearchParams(location.search).get('volume'));
-  const volumeSize = requestedVolumeSize === 128 ? 128 : 64;
-  const gridWidth = volumeSize === 64 ? 8 : 16;
-  const gridHeight = 8;
-  const atlasWidth = volumeSize * gridWidth;
-  const atlasHeight = volumeSize * gridHeight;
-  const volumeTextures = [
-    // texelFetch in the propagation pass remains exact, while LINEAR gives
-    // the scene pass bilinear XY filtering; Z is interpolated manually.
-    createFloatTexture(gl, atlasWidth, atlasHeight, gl.LINEAR),
-    createFloatTexture(gl, atlasWidth, atlasHeight, gl.LINEAR),
-  ];
-  const volumeFrames = volumeTextures.map(texture => createFramebuffer(gl, texture));
-  const targetTexture = createFloatTexture(gl, atlasWidth, atlasHeight, gl.NEAREST);
-  const targetFrame = createFramebuffer(gl, targetTexture);
+  const requestedSize = Number(new URLSearchParams(location.search).get('volume'));
+  const volumeSize = requestedSize === 64 ? 64 : 128;
+  const volumeTextures = [createTexture3D(gl, volumeSize), createTexture3D(gl, volumeSize)];
+  const volumeFrames = [gl.createFramebuffer(), gl.createFramebuffer()];
 
-  // A large positive first frame prevents uninitialized texels becoming phantom surfaces.
-  for (const frame of volumeFrames) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, frame);
-    gl.viewport(0, 0, atlasWidth, atlasHeight);
-    gl.clearColor(4, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+  // Initialize every layer to a positive distance.
+  for (let textureIndex = 0; textureIndex < 2; textureIndex++) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, volumeFrames[textureIndex]);
+    gl.viewport(0, 0, volumeSize, volumeSize);
+    for (let layer = 0; layer < volumeSize; layer++) {
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, volumeTextures[textureIndex], 0, layer);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('3D float framebuffer unsupported');
+      gl.clearColor(4, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
   }
 
-  let sceneTexture;
-  let sceneFrame;
+  let sceneTexture = null;
+  let sceneFrame = null;
   let screenWidth = 0;
   let screenHeight = 0;
   let volumeIndex = 0;
+  let volumeIterations = 0;
+  let previousMorph = Number.NaN;
   let quality = options.quality ?? 0.72;
   let paused = false;
   let automaticMorph = options.initialAutoMorph ?? true;
@@ -112,8 +106,6 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
   let startTime = performance.now();
   let elapsed = 0;
   let lastUiUpdate = 0;
-  let lastVolumeMorph = Number.NaN;
-  let settleFrames = 0;
   const fixedTime = Number.isFinite(options.fixedTime) ? options.fixedTime : null;
 
   function resize() {
@@ -127,21 +119,28 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     canvas.height = height;
     if (sceneTexture) gl.deleteTexture(sceneTexture);
     if (sceneFrame) gl.deleteFramebuffer(sceneFrame);
-    sceneTexture = createFloatTexture(gl, width, height, gl.LINEAR);
-    sceneFrame = createFramebuffer(gl, sceneTexture);
+    sceneTexture = createTexture2D(gl, width, height);
+    sceneFrame = createFramebuffer2D(gl, sceneTexture);
   }
 
-  function bindTexture(unit, texture) {
+  function bind2D(unit, texture) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, texture);
+  }
+
+  function bind3D(unit, texture) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_3D, texture);
   }
 
   function morphAt(time) {
     if (!automaticMorph) return manualMorph;
     const phase = ((time / 40) % 1 + 1) % 1;
-    const up = Math.max(0, Math.min(1, (phase - 0.2) / 0.2));
-    const down = Math.max(0, Math.min(1, (phase - 0.75) / 0.2));
-    return up * up * (3 - 2 * up) - down * down * (3 - 2 * down);
+    const rise = Math.max(0, Math.min(1, (phase - 0.2) / 0.2));
+    const fall = Math.max(0, Math.min(1, (phase - 0.75) / 0.2));
+    const smoothRise = rise * rise * (3 - 2 * rise);
+    const smoothFall = fall * fall * (3 - 2 * fall);
+    return smoothRise - smoothFall;
   }
 
   function draw(now) {
@@ -149,54 +148,42 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
     if (fixedTime !== null) elapsed = fixedTime;
     else if (!paused) elapsed = (now - startTime) / 1000;
     const morph = morphAt(elapsed);
+    const changing = !Number.isFinite(previousMorph) || Math.abs(morph - previousMorph) > 1e-5;
 
-    // Pass 1a: expensive procedural target field. It only runs when morph changes.
-    const morphChanged = !Number.isFinite(lastVolumeMorph) || Math.abs(morph - lastVolumeMorph) > 0.00025;
-    gl.useProgram(volumeProgram);
-    gl.viewport(0, 0, atlasWidth, atlasHeight);
-    gl.uniform1f(volumeUniforms.uMorph, morph);
-    gl.uniform1f(volumeUniforms.uSize, volumeSize);
-    gl.uniform2f(volumeUniforms.uGrid, gridWidth, gridHeight);
-    if (morphChanged) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, targetFrame);
-      gl.uniform1i(volumeUniforms.uMode, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      lastVolumeMorph = morph;
-      settleFrames = 128;
-    }
-
-    // Pass 1b: cheap distance propagation. Once converged, the whole Volume pass freezes.
-    if (settleFrames > 0) {
+    // Shadertoy mainVolume equivalent: one render per Z layer into a real 3D texture.
+    if (volumeIterations < 128 || changing) {
+      gl.useProgram(volumeProgram);
       gl.bindFramebuffer(gl.FRAMEBUFFER, volumeFrames[1 - volumeIndex]);
-      bindTexture(0, volumeTextures[volumeIndex]);
-      bindTexture(1, targetTexture);
+      gl.viewport(0, 0, volumeSize, volumeSize);
+      bind3D(0, volumeTextures[volumeIndex]);
       gl.uniform1i(volumeUniforms.uPrevious, 0);
-      gl.uniform1i(volumeUniforms.uTarget, 1);
-      gl.uniform1i(volumeUniforms.uMode, 1);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.uniform1f(volumeUniforms.uMorph, morph);
+      gl.uniform1f(volumeUniforms.uSize, volumeSize);
+      for (let layer = 0; layer < volumeSize; layer++) {
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, volumeTextures[1 - volumeIndex], 0, layer);
+        gl.uniform1f(volumeUniforms.uLayer, layer);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
       volumeIndex = 1 - volumeIndex;
-      settleFrames -= 1;
+      volumeIterations += 1;
+      previousMorph = morph;
     }
 
-    // Pass 2: ray march the volume and render sky/water into an HDR RGBA target.
     gl.useProgram(sceneProgram);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFrame);
     gl.viewport(0, 0, screenWidth, screenHeight);
-    bindTexture(0, volumeTextures[volumeIndex]);
+    bind3D(0, volumeTextures[volumeIndex]);
     gl.uniform1i(sceneUniforms.uVolume, 0);
     gl.uniform2f(sceneUniforms.uResolution, screenWidth, screenHeight);
     gl.uniform1f(sceneUniforms.uTime, elapsed);
     gl.uniform1f(sceneUniforms.uMorph, morph);
     gl.uniform1f(sceneUniforms.uSize, volumeSize);
-    gl.uniform2f(sceneUniforms.uGrid, gridWidth, gridHeight);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // Pass 3: depth of field, bloom, god rays, grade and letterbox.
     gl.useProgram(postProgram);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, screenWidth, screenHeight);
-    bindTexture(0, sceneTexture);
+    bind2D(0, sceneTexture);
     gl.uniform1i(postUniforms.uScene, 0);
     gl.uniform2f(postUniforms.uResolution, screenWidth, screenHeight);
     gl.uniform1f(postUniforms.uTime, elapsed);
@@ -216,8 +203,6 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
       [volumeProgram, sceneProgram, postProgram].forEach(program => gl.deleteProgram(program));
       volumeTextures.forEach(texture => gl.deleteTexture(texture));
       volumeFrames.forEach(frame => gl.deleteFramebuffer(frame));
-      gl.deleteTexture(targetTexture);
-      gl.deleteFramebuffer(targetFrame);
       gl.deleteTexture(sceneTexture);
       gl.deleteFramebuffer(sceneFrame);
       gl.deleteBuffer(triangle);

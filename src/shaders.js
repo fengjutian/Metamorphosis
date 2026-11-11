@@ -7,12 +7,10 @@ export const volumeFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 out vec4 fragColor;
-uniform sampler2D uPrevious;
-uniform sampler2D uTarget;
+uniform sampler3D uPrevious;
 uniform float uMorph;
 uniform float uSize;
-uniform vec2 uGrid;
-uniform int uMode;
+uniform float uLayer;
 
 #define TAU 6.28318530718
 
@@ -53,10 +51,7 @@ float lotus(vec3 q){
   d=min(d,min(max(w.x,w.y),0.)+length(max(w,0.))-.03);
   return min(d,length(q-vec3(0,b+.04,0))-.12);
 }
-ivec3 voxelFromPixel(ivec2 p){int n=int(uSize),gx=int(uGrid.x),tx=p.x/n,ty=p.y/n;return ivec3(p.x-tx*n,p.y-ty*n,tx+ty*gx);}
-ivec2 pixelFromVoxel(ivec3 v){int n=int(uSize),gx=int(uGrid.x);return ivec2((v.z%gx)*n+v.x,(v.z/gx)*n+v.y);}
-float previous(ivec3 v){int n=int(uSize);v=clamp(v,ivec3(0),ivec3(n-1));return texelFetch(uPrevious,pixelFromVoxel(v),0).r;}
-float targetAt(ivec3 v){int n=int(uSize);v=clamp(v,ivec3(0),ivec3(n-1));return texelFetch(uTarget,pixelFromVoxel(v),0).r;}
+float previous(ivec3 v){int n=int(uSize);v=clamp(v,ivec3(0),ivec3(n-1));return texelFetch(uPrevious,v,0).r;}
 float targetField(vec3 voxel){
   vec3 q=voxel/(uSize*.5)-1.;
   float n=turbulence(q)/2.-.274;
@@ -65,18 +60,14 @@ float targetField(vec3 voxel){
   return mix(sphere,flower,uMorph);
 }
 void main(){
-  ivec3 V=voxelFromPixel(ivec2(gl_FragCoord.xy));
-  if(V.z>=int(uSize)){fragColor=vec4(4,0,0,1);return;}
-  if(uMode==0){fragColor=vec4(targetField(vec3(V)),0,0,1);return;}
-  float field=texelFetch(uTarget,ivec2(gl_FragCoord.xy),0).r;
+  ivec3 V=ivec3(ivec2(gl_FragCoord.xy),int(uLayer));
+  float field=targetField(vec3(V));
   if(field<=.1){fragColor=vec4(field,0,0,1);return;}
   float best=1e9,bestLen=0.,voxel=2./uSize;
   for(int k=0;k<27;k++){
     if(k==13)continue;
     ivec3 off=ivec3(k%3,(k/3)%3,k/9)-1;
-    ivec3 neighbor=V+off;
-    float neighborTarget=targetAt(neighbor);
-    float value=neighborTarget<=.1?neighborTarget:max(previous(neighbor),0.);
+    float value=previous(V+off);
     if(value<best){best=value;bestLen=length(vec3(off));}
   }
   fragColor=vec4(min(field,best+bestLen*voxel),0,0,1);
@@ -86,24 +77,18 @@ export const sceneFragment = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 out vec4 fragColor;
-uniform sampler2D uVolume;
+uniform sampler3D uVolume;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform float uMorph;
 uniform float uSize;
-uniform vec2 uGrid;
 
 const float WATER=-.62,SKY_DEPTH=120.;
 const vec3 SUN=vec3(-.738,.422,.527);
 const int KEY_COUNT=8;
 const vec4 KEYS[KEY_COUNT]=vec4[KEY_COUNT](vec4(4.5,1.2,0,2.4),vec4(3.,.6,0,2.6),vec4(1.9,-.3,.1,1.9),vec4(1.5,-.35,.2,1.7),vec4(1.6,.5,.3,2.),vec4(1.5,1.6,0,1.6),vec4(2.5,1.,0,2.4),vec4(3.8,.3,0,3.));
 
-vec2 atlasUV(vec3 v,float z){float n=uSize;return (vec2(mod(z,uGrid.x)*n+v.x,floor(z/uGrid.x)*n+v.y)+.5)/(n*uGrid);}
-float volumeSample(vec3 p){
-  vec3 v=clamp((p*.5+.5)*(uSize-1.),0.,uSize-1.);
-  float z0=floor(v.z),z1=min(z0+1.,uSize-1.);
-  return mix(texture(uVolume,atlasUV(v,z0)).r,texture(uVolume,atlasUV(v,z1)).r,fract(v.z));
-}
+float volumeSample(vec3 p){return texture(uVolume,clamp(p*.5+.5,0.,1.)).r;}
 vec4 key(int i){return KEYS[((i%KEY_COUNT)+KEY_COUNT)%KEY_COUNT];}
 vec4 cameraPath(float u){int i=int(floor(u));float f=fract(u);vec4 p0=key(i-1),p1=key(i),p2=key(i+1),p3=key(i+2);return .5*(2.*p1+(-p0+p2)*f+(2.*p0-5.*p1+4.*p2-p3)*f*f+(-p0+3.*p1-3.*p2+p3)*f*f*f);}
 vec2 boxHit(vec3 p,vec3 d){vec3 a=(-1.-p)/d,b=(1.-p)/d,m=min(a,b),M=max(a,b);return vec2(max(max(m.x,m.y),m.z),min(min(M.x,M.y),M.z));}
