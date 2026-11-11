@@ -75,7 +75,7 @@ export function createMetamorphosisRenderer(canvas, options = {}) {
   }
 
   const requestedSize = Number(new URLSearchParams(location.search).get('volume'));
-  const volumeSize = [32, 64, 128].includes(requestedSize) ? requestedSize : 128;
+  const volumeSize = [32, 64, 128].includes(requestedSize) ? requestedSize : 64;
   const volumeTextures = [createTexture3D(gl, volumeSize), createTexture3D(gl, volumeSize)];
   const volumeFrames = [gl.createFramebuffer(), gl.createFramebuffer()];
 
