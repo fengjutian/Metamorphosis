@@ -1,5 +1,7 @@
 # Metamorphosis Volume
 
+详细的真实三维纹理移植方案见 [`VOLUME_3D_IMPLEMENTATION_PLAN.md`](./VOLUME_3D_IMPLEMENTATION_PLAN.md)。
+
 一个使用 React、Vite 和 WebGL2 实现的实时着色器实验，目标是将 Shadertoy 作品 **Metamorphosis Volume** 移植到本地浏览器运行。
 
 原作展示了一个漂浮在水面上的体积对象，在湍流噪声球与莲花之间缓慢变形，并结合水面反射、夕阳、景深、Bloom、大气雾和 God Rays 等效果。
