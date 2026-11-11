@@ -42,7 +42,7 @@ function App() {
 
       <aside className="panel">
         <div className="panel-head">
-          <span>VOLUME STUDY</span><span className="live"><i /> LIVE</span>
+          <span>128³ VOLUME</span><span className="live"><i /> LIVE</span>
         </div>
         <label className="row switch-row">
           <span>自动形变</span>

@@ -166,24 +166,35 @@ z112 z113 z114 ...  z127
 
 ## 当前实现状态
 
-当前 `src/renderer.js` 是可以运行的 React/WebGL2 视觉原型，包含：
+当前版本已经接入真正的三阶段 WebGL2 管线：
 
-- 球体到莲花的程序化 SDF 形变；
-- 关键视觉材质与夕阳天空；
-- 水面及反射；
-- 电影宽屏、调色、暗角和颗粒；
-- 自动形变、手动形变、暂停和渲染比例控制。
+1. **Volume Pass**：将 `128³` 体素排列为 `16 × 8` 个切片，保存到两张 `2048 × 1024 RGBA16F` 图集并进行 ping-pong 更新；
+2. **Scene Pass**：对体积距离场进行 sphere tracing 和体积积分，渲染天空、水面及二次体积反射，并在 Alpha 中保存深度；
+3. **Image Pass**：执行景深、Bloom、God Rays、雾、色差、色调映射、调色、颗粒和宽银幕遮幅。
 
-当前版本仍是单个 WebGL2 Fragment Shader 的近似实现，**尚未完整接入原始的三阶段 Volume → Scene → Image 管线**。因此它可以表现相似主题，但不是三个原始 Shader 文件的逐 Pass 等价输出。
+相关实现位于：
 
-完整移植还需要：
+- `src/shaders.js`：Volume、Scene 与 Image 三个 GLSL Pass；
+- `src/renderer.js`：图集寻址、浮点纹理、framebuffer 和三阶段调度；
+- `src/main.jsx`：React 控制界面。
 
-1. 将 `mainVolume` 转换为二维切片图集计算；
-2. 为 Volume Buffer 实现浮点纹理 ping-pong；
-3. 实现三维坐标到切片图集坐标的映射与插值；
-4. 将 Scene Pass 渲染到带浮点深度 Alpha 的离屏纹理；
-5. 接入原始 Image Pass；
-6. 根据设备性能选择 `64³`、`96³` 或 `128³` 体积质量。
+默认体积尺寸在 `src/renderer.js` 中设置：
+
+```js
+const volumeSize = 128;
+const gridWidth = 16;
+const gridHeight = 8;
+```
+
+`128³` 每帧需要处理 2,097,152 个体素，计算量很高。如果设备无法维持可接受的帧率，可将其降为：
+
+```js
+const volumeSize = 64;
+const gridWidth = 8;
+const gridHeight = 8;
+```
+
+64³ 模式已经通过软件 WebGL 渲染验证；128³ 模式可以成功构建和编译，但建议使用支持 WebGL2 浮点 framebuffer 的独立显卡运行。
 
 ## 浏览器要求
 
