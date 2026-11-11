@@ -5,7 +5,8 @@ import { createMetamorphosisRenderer } from './renderer.js';
 
 function App() {
   const query = new URLSearchParams(window.location.search);
-  const volumeSize = query.get('volume') === '128' ? 128 : 64;
+  const requestedVolumeSize = Number(query.get('volume'));
+  const volumeSize = [32, 64, 128].includes(requestedVolumeSize) ? requestedVolumeSize : 64;
   const initialMorph = Math.max(0, Math.min(1, Number(query.get('morph')) || 0));
   const hasFixedMorph = query.has('morph');
   const fixedTime = query.has('time') ? Math.max(0, Number(query.get('time')) || 0) : null;
